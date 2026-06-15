@@ -663,7 +663,7 @@ function upsertAssignment(data) {
     databaseArray.push(envelope);
   }
   updateDataState(databaseArray, true);
-  autoUploadToCloud();
+  pullAndMergeCloudData();
 }
 
 function deleteAssignment(id) {
@@ -677,7 +677,7 @@ function deleteAssignment(id) {
       : record
   );
   updateDataState(databaseArray, true);
-  autoUploadToCloud();
+  pullAndMergeCloudData();
 }
 
 function addConfig(key, val) {
@@ -697,7 +697,7 @@ function addConfig(key, val) {
         : r
     );
     updateDataState(databaseArray, true);
-    autoUploadToCloud();
+    pullAndMergeCloudData();
   }
 }
 
@@ -744,7 +744,7 @@ function updateConfig(key, idx, val) {
     return r;
   });
   updateDataState(databaseArray, true);
-  autoUploadToCloud();
+  pullAndMergeCloudData();
 }
 
 function deleteConfig(key, idx) {
@@ -761,7 +761,7 @@ function deleteConfig(key, idx) {
       : r
   );
   updateDataState(databaseArray, true);
-  autoUploadToCloud();
+  pullAndMergeCloudData();
 }
 
 function render() {
