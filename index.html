@@ -1575,7 +1575,7 @@ async function autoUploadToCloud() {
                 cloudFileId = response.result.files[0].id;
             } else {
                 const metaResp = await gapi.client.drive.files.create({
-                    resource: { name: 'edutracker_backup.json' parents: ['appDataFolder'] },
+                    resource: { name: 'edutracker_backup.json', parents: ['appDataFolder'] },
                     fields: 'id'
                 });
                 cloudFileId = metaResp.result.id;
