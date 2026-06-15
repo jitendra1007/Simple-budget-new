@@ -497,7 +497,7 @@ function importData(event) {
       const parsed = JSON.parse(e.target.result);
       if (Array.isArray(parsed)) {
         updateDataState(parsed, true);
-        autoUploadToCloud();
+        PullpullAndMergeCloudData();
       } else if (parsed && typeof parsed === 'object') {
         const assignments = Array.isArray(parsed.assignments) ? parsed.assignments : [];
         const config = parsed.config || DEFAULT_STATE.config;
@@ -529,7 +529,7 @@ function importData(event) {
         });
         
         updateDataState(newDatabaseArray, true);
-        autoUploadToCloud();
+        pullAndMergeCloudData();
       } else {
         alert("Invalid file structure.");
       }
@@ -559,7 +559,7 @@ function clearAllData() {
       }
     ];
     updateDataState(databaseArray, true);
-    autoUploadToCloud();
+    pullAndMergeCloudData();
   }
 }
 
