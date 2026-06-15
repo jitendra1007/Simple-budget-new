@@ -3,10 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow">
 <title>EduTracker - Assignment Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; }
@@ -19,8 +22,8 @@
 
   .sidebar { background: #0f172a; display: flex; flex-direction: column; padding: 32px 0; gap: 32px; flex-shrink: 0; width: 80px; transition: width .3s ease; position: relative; z-index: 100; }
   .sidebar.expanded { width: 256px; }
-  .sidebar-toggle { position: absolute; right: -12px; top: 112px; width: 24px; height: 24px; background: #4f46e5; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,.2); z-index: 110; }
-  .sidebar-toggle:hover { background: #4338ca; }
+  .menu-toggle { color: #64748b; transition: all .2s; display: inline-flex; cursor: pointer; border: none; background: none; padding: 6px; border-radius: 8px; align-items: center; justify-content: center; }
+  .menu-toggle:hover { color: #fff; background: #1e293b; }
   .sidebar-brand { display: flex; align-items: center; gap: 16px; padding: 0 24px; }
   .sidebar:not(.expanded) .sidebar-brand { padding: 0; justify-content: center; }
   .brand-icon { width: 48px; height: 48px; background: #4f46e5; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; box-shadow: 0 10px 25px rgba(67,56,202,.2); }
@@ -263,10 +266,17 @@
     .cal-cell { min-height: 100px; }
     .cal-grid, .cal-dow { border-color: #94a3b8 !important; }
   }
+
+  .sync-status { font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; background-color: #f1f5f9; color: #64748b; }
+  .sync-status.active { background-color: #e0f2fe; color: #0369a1; }
+  .sync-status.error { background-color: #fef2f2; color: #e11d48; cursor: pointer; }
+  .btn-danger-outline { color: #e11d48 !important; border: 1px solid #ffe4e6 !important; background: #fff; }
+  .btn-danger-outline:hover { background: #fff1f2 !important; color: #be123c !important; border-color: #fecdd3 !important; }
 </style>
 </head>
 <body>
 <div id="app" class="app"></div>
+<input type="file" id="importFile" accept=".json" onchange="importData(event)" style="display: none;">
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
@@ -297,41 +307,267 @@
     <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
     <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
     <symbol id="i-print" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></symbol>
   </defs>
 </svg>
 
 <script>
-const STORAGE_KEY = 'edutracker.v1';
-
 const DEFAULT_STATE = {
   assignments: [],
   config: {
     status: ['Not Started', 'In Progress', 'Complete'],
+    completeStatus: 'Complete',
     priority: ['Urgent', 'High', 'Medium', 'Low', 'Very Low'],
-    courses: ['Maths', 'Biology', 'Physics', 'Geography', 'History'],
-    grades: ['A', 'B', 'C', 'D', 'F']
+    courses: [],
+    grades: []
   },
   ui: { activeTab: 'dashboard', mondayStart: false, navExpanded: false, hideCompleted: false }
 };
 
-let state = load();
+let databaseArray = [];
 
-function load() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return JSON.parse(JSON.stringify(DEFAULT_STATE));
-    const parsed = JSON.parse(raw);
-    return {
-      assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [],
-      config: Object.assign({}, DEFAULT_STATE.config, parsed.config || {}),
-      ui: Object.assign({}, DEFAULT_STATE.ui, parsed.ui || {})
+function loadData() {
+  const storedData = localStorage.getItem('generic_app_data');
+  if (storedData) {
+    try {
+      databaseArray = JSON.parse(storedData);
+    } catch (e) {
+      databaseArray = [];
+    }
+  } else {
+    // Try migrating from old 'edutracker.v1'
+    try {
+      const oldRaw = localStorage.getItem('edutracker.v1');
+      if (oldRaw) {
+        const oldParsed = JSON.parse(oldRaw);
+        if (oldParsed) {
+          const assignments = Array.isArray(oldParsed.assignments) ? oldParsed.assignments : [];
+          const config = Object.assign({}, DEFAULT_STATE.config, oldParsed.config || {});
+          
+          assignments.forEach(a => {
+            databaseArray.push({
+              id: a.id || "rec_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+              table: "assignments",
+              updatedAt: Date.now(),
+              deleted: false,
+              data: {
+                task: a.task || '',
+                course: a.course || '',
+                date: a.date || '',
+                priority: a.priority || 'Medium',
+                status: a.status || 'Not Started',
+                notes: a.notes || ''
+              }
+            });
+          });
+          
+          databaseArray.push({
+            id: "config_settings",
+            table: "config",
+            updatedAt: Date.now(),
+            deleted: false,
+            data: config
+          });
+          
+          localStorage.setItem('generic_app_data', JSON.stringify(databaseArray));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to migrate old data', e);
+    }
+  }
+
+  // Ensure config envelope exists in databaseArray
+  let configRecord = databaseArray.find(r => r.table === 'config' && !r.deleted);
+  if (!configRecord) {
+    configRecord = {
+      id: "config_settings",
+      table: "config",
+      updatedAt: Date.now(),
+      deleted: false,
+      data: JSON.parse(JSON.stringify(DEFAULT_STATE.config))
     };
-  } catch (e) {
-    console.error('Failed to load state', e);
-    return JSON.parse(JSON.stringify(DEFAULT_STATE));
+    databaseArray.push(configRecord);
+    localStorage.setItem('generic_app_data', JSON.stringify(databaseArray));
+  } else {
+    if (!configRecord.data.completeStatus) {
+      configRecord.data.completeStatus = 'Complete';
+      localStorage.setItem('generic_app_data', JSON.stringify(databaseArray));
+    }
   }
 }
-function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+let uiPrefs = loadUiPrefs();
+
+function loadUiPrefs() {
+  try {
+    const raw = localStorage.getItem('edutracker.ui');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to load UI preferences', e);
+  }
+  try {
+    const oldRaw = localStorage.getItem('edutracker.v1');
+    if (oldRaw) {
+      const oldParsed = JSON.parse(oldRaw);
+      if (oldParsed && oldParsed.ui) {
+        return Object.assign({}, DEFAULT_STATE.ui, oldParsed.ui);
+      }
+    }
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_STATE.ui));
+}
+
+function saveUiPrefs() {
+  localStorage.setItem('edutracker.ui', JSON.stringify(uiPrefs));
+}
+
+function save() {
+  saveUiPrefs();
+}
+
+function getAssignments() {
+  return databaseArray.filter(r => r.table === 'assignments' && !r.deleted).map(r => ({
+    id: r.id,
+    task: r.data.task || '',
+    course: r.data.course || '',
+    date: r.data.date || '',
+    priority: r.data.priority || 'Medium',
+    status: r.data.status || 'Not Started',
+    grade: r.data.grade || '',
+    notes: r.data.notes || ''
+  }));
+}
+
+function getConfigRecord() {
+  let record = databaseArray.find(r => r.table === 'config' && !r.deleted);
+  if (!record) {
+    record = {
+      id: "config_settings",
+      table: "config",
+      updatedAt: Date.now(),
+      deleted: false,
+      data: JSON.parse(JSON.stringify(DEFAULT_STATE.config))
+    };
+    databaseArray.push(record);
+  }
+  if (record.data && !record.data.completeStatus) {
+    record.data.completeStatus = 'Complete';
+  }
+  return record;
+}
+
+function getConfig() {
+  const record = getConfigRecord();
+  return record.data;
+}
+
+// Load initial data
+loadData();
+
+const state = {
+  get assignments() { return getAssignments(); },
+  get config() { return getConfig(); },
+  get ui() { return uiPrefs; }
+};
+
+function updateDataState(newData, saveLocal = true) {
+  databaseArray = newData;
+  if (saveLocal) {
+    localStorage.setItem('generic_app_data', JSON.stringify(databaseArray));
+  }
+  render();
+}
+
+function exportData() {
+  if (!databaseArray.length) return alert("No data to export.");
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(databaseArray, null, 2));
+  const a = document.createElement('a'); 
+  a.setAttribute("href", dataStr); 
+  a.setAttribute("download", "edutracker_backup.json"); 
+  a.click();
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      if (Array.isArray(parsed)) {
+        updateDataState(parsed, true);
+        autoUploadToCloud();
+      } else if (parsed && typeof parsed === 'object') {
+        const assignments = Array.isArray(parsed.assignments) ? parsed.assignments : [];
+        const config = parsed.config || DEFAULT_STATE.config;
+        const newDatabaseArray = [];
+        
+        assignments.forEach(a => {
+          newDatabaseArray.push({
+            id: a.id || "rec_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            table: "assignments",
+            updatedAt: Date.now(),
+            deleted: false,
+            data: {
+              task: a.task || '',
+              course: a.course || '',
+              date: a.date || '',
+              priority: a.priority || 'Medium',
+              status: a.status || 'Not Started',
+              notes: a.notes || ''
+            }
+          });
+        });
+        
+        newDatabaseArray.push({
+          id: "config_settings",
+          table: "config",
+          updatedAt: Date.now(),
+          deleted: false,
+          data: config
+        });
+        
+        updateDataState(newDatabaseArray, true);
+        autoUploadToCloud();
+      } else {
+        alert("Invalid file structure.");
+      }
+    } catch(err) {
+      alert("Invalid JSON file.");
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function clearAllData() {
+  if (confirm("Are you sure you want to clear all data? This will delete all assignments and settings locally and in the cloud.")) {
+    databaseArray = [
+      {
+        id: "config_settings",
+        table: "config",
+        updatedAt: Date.now(),
+        deleted: false,
+        data: {
+          status: ['Not Started', 'In Progress', 'Complete'],
+          completeStatus: 'Complete',
+          priority: ['Urgent', 'High', 'Medium', 'Low', 'Very Low'],
+          courses: [],
+          grades: []
+        }
+      }
+    ];
+    updateDataState(databaseArray, true);
+    autoUploadToCloud();
+  }
+}
+
+function triggerImportWithConfirm() {
+  if (confirm("Your current data will be replaced by the imported data. Do you want to continue?")) {
+    document.getElementById('importFile').click();
+  }
+}
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 
@@ -355,13 +591,30 @@ function escapeHtml(s) {
 function fmtDate(d, opts) { return d ? d.toLocaleDateString('en-US', opts) : ''; }
 function icon(id, attrs) { return '<svg ' + (attrs || '') + '><use href="#i-' + id + '"/></svg>'; }
 
+function getCompleteStatusText() {
+  const config = getConfig();
+  if (config.completeStatus) return config.completeStatus;
+  const list = config.status || [];
+  const found = list.find(s => s.trim().toLowerCase() === 'complete');
+  if (found) return found;
+  const foundDone = list.find(s => s.trim().toLowerCase() === 'done' || s.trim().toLowerCase() === 'finished');
+  if (foundDone) return foundDone;
+  if (list.length > 0) return list[list.length - 1];
+  return 'Complete';
+}
+
+function isComplete(statusText) {
+  const completeText = getCompleteStatusText();
+  return (statusText || '').trim().toLowerCase() === completeText.trim().toLowerCase();
+}
+
 function prioClass(p) {
   const cls = { 'Urgent':'prio-Urgent','High':'prio-High','Medium':'prio-Medium','Low':'prio-Low','Very Low':'prio-VeryLow' };
   return cls[p] || 'prio-default';
 }
 function statusIcon(status) {
   const s = (status || '').toLowerCase();
-  if (s === 'complete') return icon('check-circle', 'width="16" height="16" class="status-complete"');
+  if (isComplete(status)) return icon('check-circle', 'width="16" height="16" class="status-complete"');
   if (s === 'in progress') return icon('clock', 'width="16" height="16" class="status-progress"');
   return icon('circle', 'width="16" height="16" class="status-default"');
 }
@@ -381,63 +634,134 @@ const ui = {
 
 function upsertAssignment(data) {
   if (data.id) {
-    const idx = state.assignments.findIndex(a => a.id === data.id);
-    if (idx >= 0) state.assignments[idx] = Object.assign({}, state.assignments[idx], data);
-    else state.assignments.push(Object.assign({}, data));
+    databaseArray = databaseArray.map(record => 
+      record.id === data.id 
+        ? { 
+            ...record, 
+            updatedAt: Date.now(),
+            data: { ...record.data, ...data }
+          } 
+        : record
+    );
   } else {
-    state.assignments.push(Object.assign({}, data, { id: uid() }));
+    const newId = "rec_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const envelope = {
+      id: newId,
+      table: "assignments",
+      updatedAt: Date.now(),
+      deleted: false,
+      data: {
+        task: data.task || '',
+        course: data.course || '',
+        date: data.date || '',
+        priority: data.priority || 'Medium',
+        status: data.status || 'Not Started',
+        grade: data.grade || '',
+        notes: data.notes || ''
+      }
+    };
+    databaseArray.push(envelope);
   }
-  save();
+  updateDataState(databaseArray, true);
+  autoUploadToCloud();
 }
+
 function deleteAssignment(id) {
-  state.assignments = state.assignments.filter(a => a.id !== id);
-  save();
+  databaseArray = databaseArray.map(record => 
+    record.id === id 
+      ? { 
+          ...record, 
+          deleted: true,
+          updatedAt: Date.now()
+        } 
+      : record
+  );
+  updateDataState(databaseArray, true);
+  autoUploadToCloud();
 }
+
 function addConfig(key, val) {
   val = (val || '').trim();
   if (!val) return;
-  state.config[key] = state.config[key] || [];
-  if (!state.config[key].includes(val)) state.config[key].push(val);
-  save();
+  const record = getConfigRecord();
+  const currentList = record.data[key] || [];
+  if (!currentList.includes(val)) {
+    const newList = [...currentList, val];
+    databaseArray = databaseArray.map(r => 
+      r.id === record.id 
+        ? { 
+            ...r, 
+            updatedAt: Date.now(), 
+            data: { ...r.data, [key]: newList } 
+          } 
+        : r
+    );
+    updateDataState(databaseArray, true);
+    autoUploadToCloud();
+  }
 }
+
 function updateConfig(key, idx, val) {
   val = (val || '').trim();
   if (!val) return;
-  state.config[key][idx] = val;
-  save();
-}
-function deleteConfig(key, idx) {
-  state.config[key].splice(idx, 1);
-  save();
+  const record = getConfigRecord();
+  const currentList = record.data[key] || [];
+  const oldVal = currentList[idx];
+  
+  const newList = [...currentList];
+  newList[idx] = val;
+  
+  let newCompleteStatus = record.data.completeStatus || 'Complete';
+  if (key === 'status' && oldVal && oldVal.trim().toLowerCase() === newCompleteStatus.trim().toLowerCase()) {
+    newCompleteStatus = val;
+  }
+  
+  const fieldMap = {
+    status: 'status',
+    priority: 'priority',
+    courses: 'course',
+    grades: 'grade'
+  };
+  const fieldName = fieldMap[key];
+
+  databaseArray = databaseArray.map(r => {
+    if (r.id === record.id) {
+      return { 
+        ...r, 
+        updatedAt: Date.now(), 
+        data: { ...r.data, [key]: newList, completeStatus: newCompleteStatus } 
+      };
+    } else if (r.table === 'assignments' && !r.deleted && fieldName) {
+      const currentFieldValue = r.data[fieldName];
+      if (currentFieldValue && currentFieldValue.trim().toLowerCase() === (oldVal || '').trim().toLowerCase()) {
+        return {
+          ...r,
+          updatedAt: Date.now(),
+          data: { ...r.data, [fieldName]: val }
+        };
+      }
+    }
+    return r;
+  });
+  updateDataState(databaseArray, true);
+  autoUploadToCloud();
 }
 
-function exportJSON() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'edutracker-' + new Date().toISOString().slice(0,10) + '.json';
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
-}
-function importJSON(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const parsed = JSON.parse(e.target.result);
-      if (!parsed || typeof parsed !== 'object') throw new Error('Invalid file');
-      state = {
-        assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [],
-        config: Object.assign({}, DEFAULT_STATE.config, parsed.config || {}),
-        ui: Object.assign({}, DEFAULT_STATE.ui, parsed.ui || {})
-      };
-      state.assignments.forEach(a => { if (!a.id) a.id = uid(); });
-      save(); render();
-    } catch (err) {
-      alert('Failed to import: ' + err.message);
-    }
-  };
-  reader.readAsText(file);
+function deleteConfig(key, idx) {
+  const record = getConfigRecord();
+  const currentList = [...(record.data[key] || [])];
+  currentList.splice(idx, 1);
+  databaseArray = databaseArray.map(r => 
+    r.id === record.id 
+      ? { 
+          ...r, 
+          updatedAt: Date.now(), 
+          data: { ...r.data, [key]: currentList } 
+        } 
+      : r
+  );
+  updateDataState(databaseArray, true);
+  autoUploadToCloud();
 }
 
 function render() {
@@ -449,6 +773,15 @@ function render() {
   const modal = (ui.isAdding || ui.editingId) ? renderModal() : '';
   const moreModal = ui.activeMoreDate ? renderMoreModal() : '';
   root.innerHTML = renderSidebar() + '<main class="main-area">' + body + modal + moreModal + '</main>';
+  
+  // Restore sync status and auth UI
+  const isConnected = localStorage.getItem('has_linked_google') === 'true';
+  updateAuthUI(isConnected);
+  setSyncStatus(currentSyncStatus.text, currentSyncStatus.type);
+  if (isConnected && currentSyncStatus.type === 'error') {
+    triggerReconnectState();
+  }
+
   bindEvents();
 }
 
@@ -459,13 +792,26 @@ function renderSidebar() {
     { id:'dashboard', iconId:'dashboard', label:'Dashboard' },
     { id:'calendar',  iconId:'calendar',  label:'Calendar' }
   ];
+  
+  let brandHtml = '';
+  if (exp) {
+    brandHtml = '<div class="sidebar-brand" style="width: 100%; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 24px;">' +
+      '<div class="brand-icon" style="width: 40px; height: 40px; border-radius: 12px;">' + icon('grad', 'width="24" height="24"') + '</div>' +
+      '<span class="brand-text" style="font-size: 16px; font-weight: 700; color: #fff;">EduTracker</span>' +
+      '<button class="menu-toggle" data-act="toggle-nav" aria-label="Toggle nav" style="margin-left: auto;">' +
+        icon('menu', 'width="20" height="20"') +
+      '</button>' +
+    '</div>';
+  } else {
+    brandHtml = '<div class="sidebar-brand" style="justify-content: center; padding: 0; width: 100%;">' +
+      '<button class="menu-toggle" data-act="toggle-nav" aria-label="Toggle nav">' +
+        icon('menu', 'width="20" height="20"') +
+      '</button>' +
+    '</div>';
+  }
+
   return '<nav class="sidebar ' + (exp ? 'expanded':'') + '">' +
-    '<button class="sidebar-toggle" data-act="toggle-nav" aria-label="Toggle nav">' +
-      icon(exp ? 'chev-l':'chev-r', 'width="16" height="16"') + '</button>' +
-    '<div class="sidebar-brand">' +
-      '<div class="brand-icon">' + icon('grad', 'width="28" height="28"') + '</div>' +
-      '<span class="brand-text">EduTracker</span>' +
-    '</div>' +
+    brandHtml +
     '<div class="nav-list">' +
       tabs.map(t => '<button class="nav-btn ' + (state.ui.activeTab === t.id ? 'active':'') +
         '" data-act="tab" data-tab="' + t.id + '" title="' + t.label + '">' +
@@ -480,7 +826,7 @@ function computeStats() {
   let completed = 0, dueToday = 0, overdue = 0;
   state.assignments.forEach(a => {
     const d = parseDate(a.date);
-    const done = (a.status || '').toLowerCase() === 'complete';
+    const done = isComplete(a.status);
     if (done) completed++;
     if (d && isSameDay(d, today)) dueToday++;
     if (d && d < today && !done) overdue++;
@@ -496,19 +842,21 @@ function statCard(label, value, iconId, color) {
 }
 
 function renderCard(a) {
-  return '<div class="card">' +
+  const isDone = isComplete(a.status);
+  const deleteBtn = isDone ? '' : '<button class="icon-action danger" data-act="delete" data-id="' + a.id + '" aria-label="Delete">' + icon('trash', 'width="16" height="16"') + '</button>';
+  return '<div class="card" data-act="edit" data-id="' + a.id + '" style="cursor: pointer;">' +
     '<div class="card-top">' +
       '<span class="badge ' + prioClass(a.priority) + '">' + escapeHtml(a.priority || '—') + '</span>' +
       '<div class="card-actions">' +
         '<button class="icon-action" data-act="edit" data-id="' + a.id + '" aria-label="Edit">' +
           icon('edit', 'width="16" height="16"') + '</button>' +
-        '<button class="icon-action danger" data-act="delete" data-id="' + a.id + '" aria-label="Delete">' +
-          icon('trash', 'width="16" height="16"') + '</button>' +
+        deleteBtn +
       '</div></div>' +
     '<h3>' + escapeHtml(a.task) + '</h3>' +
     '<div class="card-meta">' +
       '<div>' + icon('book','width="14" height="14"') + ' ' + escapeHtml(a.course || '—') + '</div>' +
       '<div>' + icon('cal-days','width="14" height="14"') + ' ' + escapeHtml(a.date || '—') + '</div>' +
+      (a.grade ? '<div style="display:flex;align-items:center;gap:6px">' + icon('grad','width="14" height="14"') + ' ' + escapeHtml(a.grade) + '</div>' : '') +
     '</div>' +
     (a.notes ? '<div class="card-notes">' + escapeHtml(a.notes) + '</div>' : '') +
     '<div class="card-footer"><div class="status-display">' + statusIcon(a.status) +
@@ -558,7 +906,7 @@ function renderDashboard() {
       const matchesSearch = (a.task || '').toLowerCase().includes(ui.search.toLowerCase());
       const matchesCourse = ui.filterCourse === 'All' || a.course === ui.filterCourse;
       const matchesStatus = ui.filterStatus === 'All' || a.status === ui.filterStatus;
-      const done = (a.status || '').toLowerCase() === 'complete';
+      const done = isComplete(a.status);
       return matchesSearch && matchesCourse && matchesStatus && (!state.ui.hideCompleted || !done);
     })
     .sort((a,b) => ((parseDate(a.date) && parseDate(a.date).getTime()) || Infinity) -
@@ -601,10 +949,6 @@ function renderDashboard() {
         '<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px">' +
           '<div><h2>Academic Overview</h2><p class="subtitle">Manage your active workload</p></div>' +
           '<div class="data-toolbar">' +
-            '<button class="btn-secondary" data-act="print" title="Print">' + icon('print','width="16" height="16"') + ' Print</button>' +
-            '<button class="btn-secondary" data-act="export" title="Export JSON">' + icon('download','width="16" height="16"') + ' Export</button>' +
-            '<label class="btn-secondary" title="Import JSON" style="cursor:pointer">' + icon('upload','width="16" height="16"') + ' Import' +
-              '<input type="file" accept="application/json" data-act="import" style="display:none"></label>' +
             '<button class="btn-primary" data-act="add">' + icon('plus','width="16" height="16"') + ' Add Assignment</button>' +
           '</div>' +
         '</div>' +
@@ -652,11 +996,13 @@ function renderSetup() {
               '<button class="icon-action" data-act="config-cancel">' + icon('x','width="16" height="16"') + '</button>' +
               '</div>';
           }
+          const isCompleteStatus = col.key === 'status' && isComplete(val);
+          const deleteBtnHtml = isCompleteStatus ? '' : '<button class="icon-action danger" data-act="config-delete" data-key="' + col.key + '" data-idx="' + idx + '">' + icon('trash','width="14" height="14"') + '</button>';
           return '<div class="setup-item">' +
             '<span class="val">' + escapeHtml(val) + '</span>' +
             '<div class="actions">' +
               '<button class="icon-action" data-act="config-start-edit" data-key="' + col.key + '" data-idx="' + idx + '">' + icon('edit','width="14" height="14"') + '</button>' +
-              '<button class="icon-action danger" data-act="config-delete" data-key="' + col.key + '" data-idx="' + idx + '">' + icon('trash','width="14" height="14"') + '</button>' +
+              deleteBtnHtml +
             '</div></div>';
         }).join('');
     return '<div class="setup-col">' +
@@ -668,12 +1014,55 @@ function renderSetup() {
       '<div class="setup-items">' + itemsHtml + '</div>' +
     '</div>';
   }).join('');
+
+  const isConnected = localStorage.getItem('has_linked_google') === 'true';
+  const syncCardHtml = '<div style="grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-top: 32px; border-top: 1px solid #e2e8f0; padding-top: 24px;">' +
+    '<h2 style="font-size: 18px; font-weight: 700; color: #1e293b; margin: 0;">Backup Options</h2>' +
+    '<button class="btn-secondary btn-danger-outline" onclick="clearAllData()" style="padding: 8px 16px; font-size: 13px; display: flex; align-items: center; gap: 8px;">' +
+      icon('trash','width="14" height="14"') + ' Clear Data' +
+    '</button>' +
+  '</div>' +
+  '<div style="grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; margin-top: 8px;">' +
+    '<div class="setup-col" style="display: flex; flex-direction: column;">' +
+      '<div class="setup-col-header col-emerald">' + icon('clipboard','width="16" height="16"') + '<h2>Manual backup</h2></div>' +
+      '<div style="padding: 20px; display: flex; flex-direction: column; gap: 16px; justify-content: space-between; flex: 1;">' +
+        '<div>' +
+          '<p style="margin: 0 0 16px; font-size: 14px; font-weight: 500; color: #475569;">Backup data on your device</p>' +
+          '<div style="display: flex; gap: 12px; margin-bottom: 16px;">' +
+            '<button class="btn-secondary" onclick="exportData()" style="flex: 1; justify-content: center; font-size: 13px;">Export data</button>' +
+            '<button class="btn-secondary" onclick="triggerImportWithConfirm()" style="flex: 1; justify-content: center; font-size: 13px;">Import data</button>' +
+          '</div>' +
+        '</div>' +
+        '<p style="margin: 0; font-size: 13px; color: #94a3b8; line-height: 1.5; font-style: italic;">' +
+          'No automatic sync across devices. Data is stored locally, and clearing browser cache deletes your data.' +
+        '</p>' +
+      '</div>' +
+    '</div>' +
+    '<div class="setup-col" style="display: flex; flex-direction: column;">' +
+      '<div class="setup-col-header col-blue">' + icon('activity','width="16" height="16"') + '<h2>Automatic backup</h2></div>' +
+      '<div style="padding: 20px; display: flex; flex-direction: column; gap: 16px; justify-content: space-between; flex: 1;">' +
+        '<div>' +
+          '<p style="margin: 0 0 16px; font-size: 14px; font-weight: 500; color: #475569;">Backup data on your Google Drive</p>' +
+          '<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">' +
+            '<button id="authBtn" class="' + (isConnected ? 'btn-secondary btn-danger-outline' : 'btn-primary') + '" onclick="handleAuthClick()" style="font-size: 13px;">' +
+              (isConnected ? 'Disconnect' : 'Connect to Google Drive') +
+            '</button>' +
+            '<div id="syncStatusIndicator" class="sync-status" style="display: none;"></div>' +
+          '</div>' +
+        '</div>' +
+        '<p style="margin: 0; font-size: 13px; color: #94a3b8; line-height: 1.5; font-style: italic;">' +
+          'Connect using the same account on other devices for automatic sync. Mobile/tablet needs to be reconnected after one hour.' +
+        '</p>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
   return '<div class="view"><div class="setup">' +
     '<header class="setup-header">' +
       '<div class="setup-header-icon">' + icon('settings','width="24" height="24"') + '</div>' +
       '<div><h1>Workspace Setup</h1><p>Configure your assignment attributes</p></div>' +
     '</header>' +
-    '<div class="setup-grid">' + colsHtml + '</div>' +
+    '<div class="setup-grid">' + colsHtml + syncCardHtml + '</div>' +
   '</div></div>';
 }
 
@@ -691,7 +1080,7 @@ function renderCalendar() {
 
   const byDate = {};
   state.assignments.forEach(a => {
-    const done = (a.status || '').toLowerCase() === 'complete';
+    const done = isComplete(a.status);
     if (state.ui.hideCompleted && done) return;
     const d = parseDate(a.date); if (!d) return;
     const k = d.toDateString();
@@ -739,7 +1128,6 @@ function renderCalendar() {
         '<button class="btn-secondary ' + (state.ui.hideCompleted ? 'active':'') + '" data-act="toggle-hide">' +
           icon(state.ui.hideCompleted ? 'eye-off':'eye','width="16" height="16"') + ' ' +
           (state.ui.hideCompleted ? 'Active Only' : 'Show All') + '</button>' +
-        '<button class="btn-secondary" data-act="print">' + icon('print','width="16" height="16"') + ' Print</button>' +
       '</div>' +
     '</header>' +
     '<main class="cal-body">' +
@@ -757,6 +1145,7 @@ function renderModal() {
     priority: state.config.priority[0] || 'Medium',
     date: new Date().toISOString().slice(0,10),
     status: state.config.status[0] || 'Not Started',
+    grade: '',
     notes: ''
   };
   const courseOpts = state.config.courses.map(c =>
@@ -765,6 +1154,8 @@ function renderModal() {
     '<option value="' + escapeHtml(p) + '"' + (data.priority === p ? ' selected':'') + '>' + escapeHtml(p) + '</option>').join('');
   const statusOpts = state.config.status.map(s =>
     '<option value="' + escapeHtml(s) + '"' + (data.status === s ? ' selected':'') + '>' + escapeHtml(s) + '</option>').join('');
+  const gradeOpts = state.config.grades.map(g =>
+    '<option value="' + escapeHtml(g) + '"' + (data.grade === g ? ' selected':'') + '>' + escapeHtml(g) + '</option>').join('');
   return '<div class="modal-overlay" data-act="modal-bg">' +
     '<div class="modal">' +
       '<div class="modal-header">' +
@@ -785,6 +1176,10 @@ function renderModal() {
             '<select class="form-input" name="priority">' + prioOpts + '</select></div>' +
           '<div><label class="form-label">Status</label>' +
             '<select class="form-input" name="status">' + statusOpts + '</select></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+          '<div><label class="form-label">Grade</label>' +
+            '<select class="form-input" name="grade"><option value="">Select Grade (N/A)</option>' + gradeOpts + '</select></div>' +
         '</div>' +
         '<div><label class="form-label">Notes</label>' +
           '<textarea class="form-input" name="notes" placeholder="Links or details...">' + escapeHtml(data.notes) + '</textarea></div>' +
@@ -852,9 +1247,9 @@ function bindEvents() {
       case 'search':
         el.oninput = () => { ui.search = el.value; updateDashCards(); }; break;
       case 'filter-course':
-        el.onchange = () => { ui.filterCourse = el.value; render(); }; break;
+        el.onchange = () => { ui.filterCourse = el.value; updateDashCards(); }; break;
       case 'filter-status':
-        el.onchange = () => { ui.filterStatus = el.value; render(); }; break;
+        el.onchange = () => { ui.filterStatus = el.value; updateDashCards(); }; break;
       case 'toggle-hide':
         el.onclick = () => { state.ui.hideCompleted = !state.ui.hideCompleted; save(); render(); }; break;
       case 'toggle-monday':
@@ -936,12 +1331,21 @@ function updateDashCards() {
   if (state.ui.activeTab !== 'dashboard') return;
   const container = document.querySelector('.scroll-area');
   if (!container) return;
+
+  const searchEl = document.querySelector('[data-act="search"]');
+  const courseEl = document.querySelector('[data-act="filter-course"]');
+  const statusEl = document.querySelector('[data-act="filter-status"]');
+
+  if (searchEl) ui.search = searchEl.value;
+  if (courseEl) ui.filterCourse = courseEl.value;
+  if (statusEl) ui.filterStatus = statusEl.value;
+
   const filtered = state.assignments
     .filter(a => {
       const matchesSearch = (a.task || '').toLowerCase().includes(ui.search.toLowerCase());
       const matchesCourse = ui.filterCourse === 'All' || a.course === ui.filterCourse;
       const matchesStatus = ui.filterStatus === 'All' || a.status === ui.filterStatus;
-      const done = (a.status || '').toLowerCase() === 'complete';
+      const done = isComplete(a.status);
       return matchesSearch && matchesCourse && matchesStatus && (!state.ui.hideCompleted || !done);
     })
     .sort((a,b) => ((parseDate(a.date) && parseDate(a.date).getTime()) || Infinity) -
@@ -951,6 +1355,268 @@ function updateDashCards() {
     : '<div class="empty-state">No assignments match your filters</div>';
   bindEvents();
 }
+
+const CLIENT_ID = '305632493984-9q07n0i677ku1btdds1scke8pam5ag3s.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
+
+let tokenClient;
+let gapiInited = false;
+let gisimInited = false;
+let accessToken = null;
+let cloudFileId = null;
+let silentRefreshTimeout = null;
+
+let currentSyncStatus = { text: '', type: '' };
+
+function setSyncStatus(text, type = '') {
+    currentSyncStatus = { text, type };
+    const el = document.getElementById('syncStatusIndicator');
+    if (el) {
+        if (!text) {
+            el.style.display = 'none'; 
+        } else {
+            el.style.display = 'inline-flex';
+            el.innerText = text;
+            el.className = 'sync-status ' + type;
+            
+            if (type !== 'error') {
+                el.style.cursor = 'default';
+                el.onclick = null;
+            }
+        }
+    }
+}
+
+function gapiLoaded() {
+    gapi.load('client', async () => {
+        await gapi.client.init({ discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'] });
+        gapiInited = true;
+        evaluateRoutingSession();
+    });
+}
+
+function gisLoaded() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: async (resp) => {
+            if (silentRefreshTimeout) {
+                clearTimeout(silentRefreshTimeout);
+                silentRefreshTimeout = null;
+            }
+
+            if (resp.error !== undefined) {
+                triggerReconnectState();
+                return;
+            }
+            
+            accessToken = resp.access_token;
+            gapi.client.setToken({ access_token: accessToken });
+            
+            localStorage.setItem('google_access_token', accessToken);
+            localStorage.setItem('google_token_expiry', (Date.now() + (resp.expires_in * 1000)).toString());
+            localStorage.setItem('has_linked_google', 'true');
+            
+            updateAuthUI(true);
+            setSyncStatus("Cloud Synced ✅", "active");
+            
+            const statusEl = document.getElementById('syncStatusIndicator');
+            if(statusEl) { statusEl.style.cursor = 'default'; statusEl.onclick = null; }
+            
+            await pullAndMergeCloudData();
+        },
+    });
+    gisimInited = true;
+    evaluateRoutingSession();
+}
+window.addEventListener('load', () => { gapiLoaded(); gisLoaded(); });
+
+function evaluateRoutingSession() {
+    if (!gapiInited || !gisimInited) return;
+
+    if (localStorage.getItem('has_linked_google') === 'true') {
+        const cachedToken = localStorage.getItem('google_access_token');
+        const expiry = parseInt(localStorage.getItem('google_token_expiry') || '0');
+
+        if (cachedToken && Date.now() < expiry) {
+            accessToken = cachedToken;
+            gapi.client.setToken({ access_token: accessToken });
+            updateAuthUI(true);
+            setSyncStatus("Cloud Synced ✅", "active");
+            pullAndMergeCloudData(); 
+        } else {
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+
+            updateAuthUI(true);
+
+            if (isMobile) {
+                triggerReconnectState();
+            } else {
+                setSyncStatus("Reconnecting...", "active");
+                
+                silentRefreshTimeout = setTimeout(() => {
+                    console.warn("Silent refresh timed out. Forcing manual reconnect button.");
+                    triggerReconnectState();
+                }, 4000);
+
+                tokenClient.requestAccessToken({ prompt: 'none' }); 
+            }
+        }
+    } else {
+        updateAuthUI(false);
+    }
+}
+
+function triggerReconnectState() {
+    const statusEl = document.getElementById('syncStatusIndicator');
+    setSyncStatus("Session Expired - Tap to Reconnect 🔄", "error");
+    
+    if (statusEl) {
+        statusEl.style.cursor = "pointer";
+        statusEl.onclick = () => {
+            setSyncStatus("Connecting...", "active");
+            tokenClient.requestAccessToken({ prompt: '' }); 
+        };
+    }
+}
+
+function handleAuthFailure() {
+    localStorage.removeItem('google_access_token');
+    updateAuthUI(false);
+}
+
+function updateAuthUI(isConnected) {
+    const authBtn = document.getElementById('authBtn');
+    if (authBtn) {
+        if (isConnected) {
+            authBtn.textContent = 'Disconnect';
+            authBtn.className = 'btn-secondary btn-danger-outline';
+        } else {
+            authBtn.textContent = 'Connect to Google Drive';
+            authBtn.className = 'btn-primary';
+        }
+    }
+}
+
+function handleAuthClick() {
+    if (localStorage.getItem('has_linked_google') === 'true') {
+        accessToken = null;
+        localStorage.setItem('has_linked_google', 'false');
+        localStorage.removeItem('google_access_token');
+        localStorage.removeItem('google_token_expiry');
+        updateAuthUI(false);
+        databaseArray = [];
+        updateDataState(databaseArray, true);
+    } else {
+        if (!gapiInited || !gisimInited) return alert("System booting. Please retry in a moment.");
+        setSyncStatus("Connecting...", "active");
+        tokenClient.requestAccessToken({ prompt: 'select_account consent' });
+    }
+}
+
+async function pullAndMergeCloudData() {
+    if (!accessToken) return;
+    try {
+        const response = await gapi.client.drive.files.list({
+            q: "name = 'edutracker_backup.json' and trashed = false",
+            spaces: 'appDataFolder',
+            fields: 'files(id, name)'
+        });
+        
+        const files = response.result.files;
+        cloudFileId = files.length > 0 ? files[0].id : null;
+
+        if (cloudFileId) {
+            const fileData = await gapi.client.drive.files.get({ fileId: cloudFileId, alt: 'media' });
+            const remotePayload = fileData.result;
+
+            if (remotePayload && remotePayload.records) {
+                const cloudRecords = remotePayload.records;
+                const mergedMap = new Map();
+                
+                cloudRecords.forEach(item => mergedMap.set(item.id, item));
+                
+                let localHasNewerEdits = false;
+                databaseArray.forEach(localItem => {
+                    const cloudItem = mergedMap.get(localItem.id);
+                    if (!cloudItem || (localItem.updatedAt > (cloudItem.updatedAt || 0))) {
+                        mergedMap.set(localItem.id, localItem);
+                        localHasNewerEdits = true;
+                    }
+                });
+                
+                const finalMergedRecords = Array.from(mergedMap.values());
+                updateDataState(finalMergedRecords, true);
+                
+                if (localHasNewerEdits) await autoUploadToCloud();
+            }
+        } else {
+            await autoUploadToCloud();
+        }
+        setSyncStatus("Cloud Synced ✅", "active");
+    } catch (err) {
+        console.error("Sync pull execution exception:", err);
+        if (err.status === 401) handleAuthFailure();
+    }
+}
+
+async function autoUploadToCloud() {
+    if (localStorage.getItem('has_linked_google') !== 'true' || !accessToken) return;
+    setSyncStatus("Saving to Cloud...", "active");
+    
+    try {
+        if (!cloudFileId) {
+            const response = await gapi.client.drive.files.list({
+                q: "name = 'edutracker_backup.json' and trashed = false",
+                spaces: 'appDataFolder',
+                fields: 'files(id)'
+            });
+            if (response.result.files.length > 0) {
+                cloudFileId = response.result.files[0].id;
+            } else {
+                const metaResp = await gapi.client.drive.files.create({
+                    resource: { name: 'edutracker_backup.json' parents: ['appDataFolder'] },
+                    fields: 'id'
+                });
+                cloudFileId = metaResp.result.id;
+            }
+        }
+        
+        const payload = { records: databaseArray };
+
+        await gapi.client.request({
+            path: `https://www.googleapis.com/upload/drive/v3/files/${cloudFileId}?uploadType=media`,
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        setSyncStatus("Cloud Synced ✅", "active");
+    } catch (err) {
+        console.error("Cloud engine commit intercept:", err);
+        setSyncStatus("Sync Paused ⚠️", "error");
+        if (err.status === 401) handleAuthFailure();
+    }
+}
+
+let lastInteractionSyncTime = Date.now(); 
+const SYNC_COOLDOWN_MS = 300000; 
+
+function handleMicroInteraction() {
+    if (localStorage.getItem('has_linked_google') !== 'true' || !accessToken) return;
+
+    const now = Date.now();
+    if (now - lastInteractionSyncTime > SYNC_COOLDOWN_MS) {
+        lastInteractionSyncTime = now;
+        setSyncStatus("Checking...", "active");
+        pullAndMergeCloudData();
+    }
+}
+
+window.addEventListener('mousemove', handleMicroInteraction);
+window.addEventListener('keydown', handleMicroInteraction);
+window.addEventListener('touchstart', handleMicroInteraction, { passive: true });
+window.addEventListener('focus', handleMicroInteraction);
 
 render();
 </script>
